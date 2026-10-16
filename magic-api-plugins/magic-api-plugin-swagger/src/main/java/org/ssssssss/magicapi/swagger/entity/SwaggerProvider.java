@@ -77,6 +77,7 @@ public class SwaggerProvider {
 			String requestPath = PathUtils.replaceSlash(this.prefix + magicResourceService.getGroupPath(info.getGroupId()) + "/" + info.getPath());
 			SwaggerEntity.Path path = new SwaggerEntity.Path(info.getId());
 			path.addTag(groupName);
+			swaggerEntity.addTag(groupName, groupName);
 			boolean hasBody = false;
 			try {
 				List<Map<String, Object>> parameters = parseParameters(info);
