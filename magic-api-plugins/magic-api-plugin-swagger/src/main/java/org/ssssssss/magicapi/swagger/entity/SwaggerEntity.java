@@ -83,7 +83,6 @@ public class SwaggerEntity {
 			schema.put("example", example);
 			parameter.put("schema", schema);
 		} else {
-			parameter.put("x-example", example);
 			parameter.put("type", type);
 		}
 		return parameter;

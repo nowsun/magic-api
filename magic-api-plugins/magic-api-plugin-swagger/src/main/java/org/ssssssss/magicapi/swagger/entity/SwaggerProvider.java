@@ -84,7 +84,7 @@ public class SwaggerProvider {
 				hasBody = parameters.stream().anyMatch(it -> VAR_NAME_REQUEST_BODY.equals(it.get("in")));
 				BaseDefinition baseDefinition = info.getRequestBodyDefinition();
 				if (hasBody && baseDefinition != null) {
-					doProcessDefinition(baseDefinition, info, groupName, "root_", "request", 0);
+					doProcessDefinition(baseDefinition, info, "request", "", 0);
 				}
 				parameters.forEach(path::addParameter);
 				if (this.persistenceResponseBody) {
@@ -93,7 +93,7 @@ public class SwaggerProvider {
 						Map<String, Object> responseMap = parseResponse(info);
 						if (!responseMap.isEmpty()) {
 							path.setResponses(responseMap);
-							doProcessDefinition(baseDefinition, info, groupName, "root_" + baseDefinition.getName(), "response", 0);
+							doProcessDefinition(baseDefinition, info, "response", "", 0);
 						}
 					} else {
 						path.addResponse("200", JsonUtils.readValue(Objects.toString(info.getResponseBody(), BODY_EMPTY), Object.class));
@@ -124,6 +124,15 @@ public class SwaggerProvider {
 		return swaggerEntity;
 	}
 
+	/**
+	 * 生成可读的模型名：{路径}{Request|Response}[.字段路径]，例如 getMaterialResponse.data
+	 */
+	private String buildModelName(ApiInfo info, String definitionType, String nodePath) {
+		String path = info.getPath().replaceFirst("/", "").replaceAll("/", "_");
+		String suffix = "request".equals(definitionType) ? "Request" : "Response";
+		return path + suffix + (StringUtils.isBlank(nodePath) ? "" : "." + nodePath);
+	}
+
 	private List<Map<String, Object>> parseParameters(ApiInfo info) {
 		List<Map<String, Object>> parameters = new ArrayList<>();
 		info.getParameters().forEach(it -> parameters.add(SwaggerEntity.createParameter(it.isRequired(), it.getName(), VAR_NAME_QUERY, it.getDataType().getJavascriptType(), it.getDescription(), it.getValue())));
@@ -139,19 +148,15 @@ public class SwaggerProvider {
 			BaseDefinition baseDefinition = info.getRequestBodyDefinition();
 			if (baseDefinition != null && !CollectionUtils.isEmpty(baseDefinition.getChildren())) {
 				Map<String, Object> parameter = SwaggerEntity.createParameter(baseDefinition.isRequired(), StringUtils.isNotBlank(baseDefinition.getName()) ? baseDefinition.getName() : VAR_NAME_REQUEST_BODY, VAR_NAME_REQUEST_BODY, baseDefinition.getDataType().getJavascriptType(), baseDefinition.getDescription(), baseDefinition);
-				Map<String, Object> schema = new HashMap<>(2);
-				String groupName = magicResourceService.getGroupName(info.getGroupId()).replace("/", "-");
-				String voName = groupName + "«" + info.getPath().replaceFirst("/", "").replaceAll("/", "_") + "«request«";
+				Map<String, Object> schema = new LinkedHashMap<>(2);
+				String voName = buildModelName(info, "request", "");
 				if (DataType.Array == baseDefinition.getDataType()) {
-					voName += "root_" + (StringUtils.isNotBlank(baseDefinition.getName()) ? baseDefinition.getName() + "_" : "_") + "»»»";
-
-					Map<String, Object> items = new HashMap<>(2);
+					Map<String, Object> items = new LinkedHashMap<>(2);
 					items.put("originalRef", voName);
 					items.put("$ref", DEFINITION + voName);
 					schema.put("items", items);
 					schema.put("type", VAR_NAME_REQUEST_BODY_VALUE_TYPE_ARRAY);
 				} else {
-					voName += "root_" + baseDefinition.getName() + "»»»";
 					schema.put("originalRef", voName);
 					schema.put("$ref", DEFINITION + voName);
 				}
@@ -171,19 +176,17 @@ public class SwaggerProvider {
 	}
 
 	private Map<String, Object> parseResponse(ApiInfo info) {
-		Map<String, Object> result = new HashMap<>();
+		Map<String, Object> result = new LinkedHashMap<>();
 
 		BaseDefinition baseDefinition = info.getResponseBodyDefinition();
 		if (!CollectionUtils.isEmpty(baseDefinition.getChildren())) {
-			String groupName = magicResourceService.getGroupName(info.getGroupId()).replace("/", "-");
-			String voName = groupName + "«" + info.getPath().replaceFirst("/", "").replaceAll("/", "_") + "«response«";
-			voName += "root_" + baseDefinition.getName() + "»»»";
+			String voName = buildModelName(info, "response", "");
 
-			Map<String, Object> schema = new HashMap<>(2);
+			Map<String, Object> schema = new LinkedHashMap<>(2);
 			schema.put("originalRef", voName);
 			schema.put("$ref", DEFINITION + voName);
 
-			Map<String, Object> response = new HashMap<>(2);
+			Map<String, Object> response = new LinkedHashMap<>(2);
 			response.put("description", "OK");
 			response.put("schema", schema);
 			result.put("200", response);
@@ -192,24 +195,25 @@ public class SwaggerProvider {
 		return result;
 	}
 
-	private Map<String, Object> doProcessDefinition(BaseDefinition target, ApiInfo info, String groupName, String parentName, String definitionType, int level) {
-		Map<String, Object> result = new HashMap<>(4);
+	private Map<String, Object> doProcessDefinition(BaseDefinition target, ApiInfo info, String definitionType, String nodePath, int level) {
+		Map<String, Object> result = new LinkedHashMap<>(4);
 		result.put("description", target.getDescription());
 		if (DataType.Array == target.getDataType()) {
 			if (!CollectionUtils.isEmpty(target.getChildren())) {
-				result.put("items", doProcessDefinition(target.getChildren().get(0), info, groupName, parentName + target.getName() + "_", definitionType, level + 1));
+				result.put("items", doProcessDefinition(target.getChildren().get(0), info, definitionType, nodePath, level + 1));
 			} else {
 				result.put("items", Collections.emptyList());
 			}
 			result.put("type", target.getDataType().getJavascriptType());
 		} else if (DataType.Object == target.getDataType() || DataType.Any == target.getDataType()) {
-			String voName = groupName + "«" + info.getPath().replaceFirst("/", "").replaceAll("/", "_") + (StringUtils.equals("response", definitionType) ? "«response«" : "«request«") + parentName + target.getName() + "»»»";
+			String voName = buildModelName(info, definitionType, nodePath);
 
-			Map<String, Object> definition = new HashMap<>(4);
-			Map<String, Map<String, Object>> properties = new HashMap<>(target.getChildren().size());
-			Set<String> requiredSet = new HashSet<>(target.getChildren().size());
+			Map<String, Object> definition = new LinkedHashMap<>(4);
+			Map<String, Map<String, Object>> properties = new LinkedHashMap<>(target.getChildren().size());
+			Set<String> requiredSet = new LinkedHashSet<>(target.getChildren().size());
 			for (BaseDefinition obj : target.getChildren()) {
-				properties.put(obj.getName(), doProcessDefinition(obj, info, groupName, parentName + target.getName() + "_", definitionType, level + 1));
+				String childPath = StringUtils.isBlank(nodePath) ? obj.getName() : nodePath + "." + obj.getName();
+				properties.put(obj.getName(), doProcessDefinition(obj, info, definitionType, childPath, level + 1));
 				if (obj.isRequired()) {
 					requiredSet.add(obj.getName());
 				}
@@ -219,8 +223,7 @@ public class SwaggerProvider {
 			definition.put("type", target.getDataType().getJavascriptType());
 			definition.put("required", requiredSet);
 			if (this.DEFINITION_MAP.containsKey(voName)) {
-				// TODO 应该不会出现名字都一样的
-				voName = voName.replace("»»»", "_" + level + "»»»");
+				voName = voName + "_" + level;
 			}
 
 			this.DEFINITION_MAP.put(voName, definition);
